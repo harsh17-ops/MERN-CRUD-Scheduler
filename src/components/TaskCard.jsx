@@ -23,7 +23,13 @@ export default function TaskCard({ task, onToggle, onEdit, onRemove }) {
         </p>
       </div>
       <span className={`status s-${task.status}`}>{task.status}</span>
-      <button aria-label={`Edit ${task.title}`} onClick={() => onEdit(task)}>↗</button>
+      <button
+        className="edit-action"
+        aria-label={`Edit ${task.title}`}
+        onClick={() => onEdit(task)}
+      >
+        Edit
+      </button>
       <button aria-label={`Delete ${task.title}`} onClick={() => onRemove(task)}>×</button>
     </article>
   );
