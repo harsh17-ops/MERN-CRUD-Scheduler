@@ -1,37 +1,105 @@
 # Architecture
 
-## Runtime pieces
+## High-level design
 
-- `src/main.jsx` mounts React; `src/App.jsx` owns shared task, form, filter, and request state.
-- `src/components/` renders the form, counts, schedule, and task actions.
-- `src/services/taskApi.js` sends HTTP requests and turns unsuccessful JSON responses into errors.
-- `src/utils/tasks.js` handles due-date sorting and date input/display formatting.
-- `server/server.js` defines the Mongoose model, Express routes, error handling, connection startup, and production static hosting.
-- MongoDB stores `Task` records in the `taskflow` database.
-
-## Data flow
+TaskFlow has a browser client, an Express REST API, and MongoDB. The API authenticates users with server-side sessions and checks task ownership for every protected operation.
 
 ```mermaid
 flowchart LR
-  User --> UI[React components]
-  UI --> App[App state and handlers]
-  App --> APIClient[taskApi service]
-  APIClient --> Express[Express API]
-  Express --> Model[Mongoose Task model]
-  Model --> DB[(MongoDB taskflow)]
-  DB --> Model --> Express --> APIClient --> App --> UI
+  Browser[React browser app] -->|JSON HTTP and session cookie| Express[Node.js and Express]
+  Express --> Auth[Auth routes and session guard]
+  Auth --> Users[(MongoDB users)]
+  Express --> TaskModel[Mongoose Task model]
+  TaskModel --> Tasks[(MongoDB tasks)]
+  Express --> Sessions[(MongoDB sessions)]
+  Express -->|production dist assets| Browser
 ```
 
-On mount, the page calls GET /api/tasks. The effect aborts the request on unmount to avoid stale state updates. Create uses POST; edits and status changes use PATCH; removal uses DELETE. Successful mutation responses update React state, then the list is sorted by due date. Filtering happens in the browser and does not alter the API.
+## System architecture and data flow
 
-## Development and production
+- Presentation: React components and responsive CSS.
+- Application: App owns user, task, form, filter, and loading/error state.
+- API client: authApi and taskApi centralize browser requests and response errors.
+- Server: Express parses JSON, loads sessions, routes API calls, and returns JSON.
+- Data: Mongoose schemas validate User and Task; MongoDB stores users, tasks, and sessions.
+- Hosting: Vite proxies API in development. Express serves dist and API in production.
 
-Vite serves frontend source and proxies /api to Express at localhost:3000 during development. In production, `npm run build` writes `dist/`, and Express serves that folder alongside the API. Express connects to MongoDB before listening. `ATLAS_URI` supplies the connection string and `PORT` controls the listener (default 3000).
+```mermaid
+sequenceDiagram
+ actor User
+ participant UI as React UI
+ participant App as App state
+ participant Client as API service
+ participant API as Express middleware and routes
+ participant DB as Mongoose and MongoDB
+ User->>UI: Submit form or select task action
+ UI->>App: Invoke callback
+ App->>Client: Call auth or task function
+ Client->>API: HTTP request, JSON, session cookie
+ API->>API: Parse request and check session
+ API->>DB: Validate and query by owner
+ DB-->>API: Document or result
+ API-->>Client: JSON and status code
+ Client-->>App: Parsed response or error
+ App-->>UI: Update state or show feedback
+```
 
-## Data validation and errors
+## Authentication flow
 
-The schema requires title and dueDate, trims and caps title at 160 characters, and limits priority/status to supported values. PATCH accepts only those four fields and runs validators. Validation and bad ID errors map to 400; missing task records map to 404; unexpected errors return generic 500 JSON and are logged.
+```mermaid
+sequenceDiagram
+ actor User
+ participant UI as AuthPanel
+ participant API as Auth routes
+ participant UserDB as MongoDB User
+ participant SessionDB as MongoStore
+ User->>UI: Submit email/password
+ UI->>API: POST register or login
+ API->>UserDB: Create hash or compare submitted password
+ UserDB-->>API: User record
+ API->>API: Regenerate session ID; record userId
+ API->>SessionDB: Save session
+ API-->>UI: HttpOnly cookie and public user data
+ UI->>API: GET /api/auth/me on next visit
+ API->>SessionDB: Load session
+ API-->>UI: Current user or 401
+```
 
-## Scope
+The browser does not get the password hash or session object. It holds the opaque HttpOnly cookie; JavaScript cannot read it.
 
-No authentication, ownership model, AI/voice integration, router, migrations, or deployment manifests are configured.
+## UX and application flow
+
+```mermaid
+flowchart TD
+  Open[Open TaskFlow] --> Session{Valid session?}
+  Session -->|No| Auth[Sign in or create account]
+  Auth -->|Success| Load[Load this user's tasks]
+  Session -->|Yes| Load
+  Load --> Schedule[Schedule, counts, status filters]
+  Schedule --> Action{User action}
+  Action --> Form[Add or edit task]
+  Action --> Toggle[Complete or reopen]
+  Action --> Delete[Delete task]
+  Form --> Request[POST or PATCH]
+  Toggle --> Request
+  Delete --> Request
+  Request --> Result{Success?}
+  Result -->|Yes| Update[Update local React state]
+  Result -->|No| Error[Show error; retain current list]
+  Update --> Schedule
+  Error --> Schedule
+```
+
+The status filters run in React over the loaded task list; they do not change API routes.
+
+## Database and errors
+
+User has a normalized unique email and passwordHash. Task has title, dueDate, priority, status, owner reference, and timestamps. The compound owner/dueDate index supports per-account schedule reads. Session records expire after seven days.
+
+Every task read/update/delete includes the session user ID. New tasks take owner from the session rather than request JSON. Validation and invalid IDs return 400; duplicate email returns 409; missing/non-owned tasks return 404; no session returns 401; unexpected errors are logged and return a generic 500.
+
+Legacy records without owner are hidden until the deliberate migration command assigns them to a chosen account.
+
+## Configuration and deployment
+
+ATLAS_URI connects MongoDB, SESSION_SECRET signs session identifiers, and PORT chooses the HTTP port (default 3000). In production, NODE_ENV=production enables Secure cookies; serve through HTTPS and configure the trusted proxy. Do not commit .env.

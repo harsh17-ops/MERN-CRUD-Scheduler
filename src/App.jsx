@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
+import AuthPanel from './components/AuthPanel.jsx';
 import TaskForm from './components/TaskForm.jsx';
 import TaskSchedule from './components/TaskSchedule.jsx';
 import TaskStats from './components/TaskStats.jsx';
+import { authenticate, fetchCurrentUser, signOut } from './services/authApi.js';
 import {
   fetchTasks,
   removeTask,
@@ -17,26 +19,46 @@ const EMPTY_FORM = {
   status: 'planned',
 };
 
-/** Owns task data and coordinates the form, schedule, and API-backed actions. */
 export default function App() {
+  const [user, setUser] = useState(null);
+  const [checkingSession, setCheckingSession] = useState(true);
   const [tasks, setTasks] = useState([]);
   const [form, setForm] = useState(EMPTY_FORM);
   const [editingId, setEditingId] = useState(null);
   const [filter, setFilter] = useState('all');
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
 
-  // Load the initial schedule once, and cancel the request if this page unmounts.
   useEffect(() => {
-    const controller = new AbortController();
+    let active = true;
+    fetchCurrentUser()
+      .then((currentUser) => {
+        if (active) setUser(currentUser);
+      })
+      .catch((requestError) => {
+        if (active) setError(requestError.message);
+      })
+      .finally(() => {
+        if (active) setCheckingSession(false);
+      });
+    return () => { active = false; };
+  }, []);
 
+  useEffect(() => {
+    if (!user) {
+      setTasks([]);
+      setLoading(false);
+      return undefined;
+    }
+
+    const controller = new AbortController();
     async function loadTasks() {
+      setLoading(true);
       try {
         const savedTasks = await fetchTasks(controller.signal);
         setTasks(sortTasks(savedTasks));
       } catch (requestError) {
-        // A cancelled request is expected when React unmounts this page.
         if (requestError.name !== 'AbortError') setError(requestError.message);
       } finally {
         if (!controller.signal.aborted) setLoading(false);
@@ -45,7 +67,7 @@ export default function App() {
 
     loadTasks();
     return () => controller.abort();
-  }, []);
+  }, [user]);
 
   const visibleTasks = useMemo(
     () => tasks.filter((task) => filter === 'all' || task.status === filter),
@@ -54,19 +76,34 @@ export default function App() {
   const plannedCount = tasks.filter((task) => task.status === 'planned').length;
   const completedCount = tasks.length - plannedCount;
 
-  /** Keep controlled form state in sync with whichever field the user edits. */
+  async function handleAuthentication(email, password, mode) {
+    const authenticatedUser = await authenticate(email, password, mode);
+    setError('');
+    setUser(authenticatedUser);
+  }
+
+  async function handleSignOut() {
+    try {
+      await signOut();
+      setUser(null);
+      setTasks([]);
+      setError('');
+      resetForm();
+    } catch (requestError) {
+      setError(requestError.message);
+    }
+  }
+
   function handleFieldChange(event) {
     const { name, value } = event.target;
     setForm((currentForm) => ({ ...currentForm, [name]: value }));
   }
 
-  /** Clear the form and leave edit mode after canceling or saving. */
   function resetForm() {
     setForm(EMPTY_FORM);
     setEditingId(null);
   }
 
-  /** Create or update a task, then reflect the saved server record in the list. */
   async function handleSubmit(event) {
     event.preventDefault();
     setSaving(true);
@@ -88,7 +125,6 @@ export default function App() {
     }
   }
 
-  /** Copy a selected task into the form so it can be edited in place. */
   function handleEdit(task) {
     setEditingId(task._id);
     setForm({
@@ -100,7 +136,6 @@ export default function App() {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }
 
-  /** Persist a completion-state change before updating the displayed task. */
   async function handleToggle(task) {
     try {
       const savedTask = await setTaskStatus(task);
@@ -113,7 +148,6 @@ export default function App() {
     }
   }
 
-  /** Delete a task and clear the form if it was the task currently being edited. */
   async function handleRemove(task) {
     try {
       await removeTask(task._id);
@@ -125,11 +159,21 @@ export default function App() {
     }
   }
 
+  if (checkingSession) {
+    return <main className="auth-shell"><p className="notice">Checking your session…</p></main>;
+  }
+  if (!user) {
+    return <AuthPanel onAuthenticated={handleAuthentication} />;
+  }
+
   return (
     <main className="shell">
       <header>
         <a className="brand" href="#">◈ taskflow<span>.</span></a>
-        <small>● &nbsp;Your work, in good order</small>
+        <div className="account-tools">
+          <small>{user.email}</small>
+          <button onClick={handleSignOut}>Sign out</button>
+        </div>
       </header>
       <section className="intro">
         <div>

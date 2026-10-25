@@ -1,30 +1,35 @@
 # Code Guide
 
-## Browser startup
+## Authentication path
 
-`index.html` provides the root node. `src/main.jsx` mounts the App component and loads the CSS. Vite enables React JSX and proxies API requests during local development.
+AuthPanel.jsx controls the email and password fields and switches between sign-in and registration. authApi.js sends same-origin JSON requests. authRoutes.js validates input, hashes new passwords, compares login passwords, regenerates the session ID, and saves userId in the server session. express-session manages the cookie; connect-mongo stores session data in MongoDB. App calls GET /api/auth/me on startup and displays either the scheduler or the auth form.
 
-## Shared state and operations
+requireAuth.js protects task routes. The Task model and every task query use the session user ID. Password hashes are excluded from ordinary User model reads and never sent to React.
 
-`src/App.jsx` owns the task list, controlled form values, edit ID, filter, and loading/saving/error states. On first render, an effect loads records. Its AbortController cancels the request if the page unmounts. Submit chooses create or edit based on the selected ID. Edit copies a task to the form. Complete/reopen and delete handlers update React state only after the server confirms success.
+## CRUD path
 
-## UI components
+TaskForm.jsx is controlled by state owned in App.jsx. Submit selects POST for create or PATCH for edit. TaskSchedule.jsx passes complete/reopen, edit, and delete callbacks to TaskCard.jsx. taskApi.js performs the HTTP calls. After success, App updates the task list from the server response; after failure it displays an error and leaves the existing record unchanged.
 
-- `TaskForm.jsx`: renders controlled task fields and calls parent callbacks.
-- `TaskStats.jsx`: displays total, planned, and completed counts.
-- `TaskSchedule.jsx`: shows filters, request feedback, empty state, and task rows.
-- `TaskCard.jsx`: shows one task and its complete, edit, and delete controls.
+Express task routes use Mongoose for validation and persistence. Updates and deletes match both the task ID and owner, so a user cannot act on another user's task by guessing its ID.
 
-The components receive values and callback functions as props; API access stays in the parent/service.
+## Main modules
 
-## API service and utilities
+- src/App.jsx: session check, state, and user-action orchestration.
+- src/components: auth form, task form, counts, schedule, and one task card.
+- src/services: HTTP requests and JSON error parsing.
+- src/utils/tasks.js: date conversion, display, and copied-array sorting.
+- server/server.js: configuration, Mongo connection, sessions, API mount order, and production hosting.
+- server/routes: auth and task handlers.
+- server/models: Mongoose field rules and ownership relation.
+- server/middleware/requireAuth.js: login guard.
+- server/scripts/assignLegacyTasks.js: optional migration for old ownerless records.
 
-`src/services/taskApi.js` contains one request function for each operation. It parses JSON and throws the server's error message when a response is unsuccessful. `src/utils/tasks.js` sorts a copied array (so React state is not mutated), formats dates for display, and converts stored dates for the browser date input.
+## Dates and errors
 
-## Server and database
+Date inputs use YYYY-MM-DD. Mongoose stores Date values; toDateInputValue prepares one for editing and formatDueDate keeps display dates stable across time zones. Sorting copies the array before ordering, preserving React's immutable state convention.
 
-`server/server.js` loads `.env`, defines the Mongoose Task schema, registers the health and CRUD routes, then connects to MongoDB before starting Express. The API writes/reads the `taskflow` database. Mongoose applies schema validation; Express error middleware formats expected validation/ID errors as 400 responses and unexpected errors as generic 500 responses.
+The auth API returns a generic invalid-login message. Server middleware maps bad input, duplicate account, unauthenticated, missing-resource, and unexpected failures to HTTP status codes. The browser shows returned messages in its feedback area.
 
-## Run and verify
+## Run it
 
-Copy `.env.example` to `.env`, configure ATLAS_URI, run `npm ci`, then `npm run build` and `npm run server`. The current package has no test or lint scripts. CRUD persistence requires a reachable MongoDB server.
+Copy .env.example to .env and set ATLAS_URI and SESSION_SECRET. Run npm ci, npm run build, and npm run server. For development, use npm run dev in another terminal. Ownerless records from before authentication require the explicit migration documented in README.

@@ -1,74 +1,70 @@
 # TaskFlow
 
-TaskFlow is a single-page due-date scheduler. It persists tasks in MongoDB and supports create, read, edit, complete/reopen, delete, and status filters (All, Planned, Completed). The page shows loading, empty, saving, and request-error feedback.
+TaskFlow is a private, full-stack deadline scheduler. Users create an account, sign in, and manage their own tasks. The app supports create, read, edit, complete/reopen, delete, and All/Planned/Completed filters.
 
-## Technology
+## Stack
 
-React 19 and Vite 8; Express 5; Mongoose 9; dotenv 18; MongoDB Atlas or another MongoDB host. Exact package versions are in package.json and package-lock.json.
+React 19, Vite 8, JavaScript ES modules, HTML, CSS, Node.js, Express 5, Mongoose 9, MongoDB, bcryptjs, express-session, and connect-mongo.
 
-## Project layout
+## Structure
 
-```
-taskflow/
-├── docs/                 Architecture and beginner-friendly code guide
-├── server/server.js      Task schema, API routes, startup, static hosting
-└── src/
-    ├── components/       Form, stats, schedule, and individual task card
-    ├── services/         Browser requests to the task API
-    ├── utils/             Date conversion, display, and due-date sorting
-    ├── App.jsx            Shared page state and user-action handlers
-    ├── index.css          Page design and responsive rules
-    └── main.jsx           React entry point
-```
+- docs: architecture diagrams and assessment guide
+- server/models: User and Task database schemas
+- server/routes: authentication and task API handlers
+- server/middleware: signed-in user guard
+- server/scripts: explicit migration for tasks created before login existed
+- src/components: authentication, task form, stats, schedule, task row
+- src/services: browser HTTP requests
+- src/utils: date conversion and sorting
+- src/App.jsx: shared state and flow between components
 
 ## Architecture
 
-`App.jsx` loads task records through `src/services/taskApi.js`, holds shared React state, and passes data and callbacks to focused display components. API calls return MongoDB documents; React updates its list only after successful writes. `src/utils/tasks.js` centralizes date conversion and due-date ordering. Express validates task data through the Mongoose `Task` model, connects to the `taskflow` database, and serves both `/api` and the built `dist/` app. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) and [docs/CODE_GUIDE.md](docs/CODE_GUIDE.md).
+React components render the page. App owns shared user/task/form state and calls API services. Express checks login sessions, validates requests with Mongoose, and reads/writes MongoDB. Task records are filtered by the signed-in user's ID. Express serves the Vite production build from the same origin as the API.
 
-## Database model
+Read docs/ARCHITECTURE.md for HLD, system, data-flow, application-flow, and UX diagrams. Read docs/ASSESSMENT_GUIDE.md for a presentation walkthrough of React, HTML, CSS, JavaScript, Node, Express, REST, MongoDB, authentication, and CRUD. Read docs/CODE_GUIDE.md for a beginner-focused file walkthrough.
 
-The Mongoose `Task` model stores title (required, trimmed, maximum 160 characters), dueDate (required), priority (`low`, `medium`, `high`; defaults to `medium`), status (`planned`, `completed`; defaults to `planned`), and created/updated timestamps. The database name is `taskflow`; Mongoose uses its `tasks` collection.
+## Models
+
+User stores a normalized unique email and a bcrypt password hash. The hash is excluded from ordinary reads and never returned to the browser.
+
+Task stores title (required, trimmed, max 160 chars), dueDate (required), priority (low/medium/high), status (planned/completed), owner reference, and timestamps. An owner/dueDate index supports each user's chronological task list. MongoStore stores sessions in the taskflow database.
 
 ## API
 
-| Method | Route | Purpose / response |
-|---|---|---|
-| GET | `/api/health` | API and database status |
-| GET | `/api/tasks` | Task array ordered by due date |
-| POST | `/api/tasks` | Create; returns saved task with 201 |
-| PATCH | `/api/tasks/:id` | Update supported fields; returns task |
-| DELETE | `/api/tasks/:id` | Delete; returns message and ID |
+| Method | Route | Access | Purpose |
+|---|---|---|---|
+| GET | /api/health | Public | API and database status |
+| GET | /api/auth/me | Public | Current user or 401 |
+| POST | /api/auth/register | Public | Create account and session |
+| POST | /api/auth/login | Public | Verify credentials and create session |
+| POST | /api/auth/logout | Signed in | Destroy session |
+| GET | /api/tasks | Signed in | Read own tasks |
+| POST | /api/tasks | Signed in | Create owned task |
+| PATCH | /api/tasks/:id | Signed in | Edit own task or status |
+| DELETE | /api/tasks/:id | Signed in | Delete own task |
 
-Validation and invalid ID errors return 400 JSON; missing records return 404; unexpected errors return a generic 500 response and are logged server-side.
+Auth requests use JSON with email and password. The user response contains only ID and email. Login failures use a generic message. A task owned by another account looks like a missing task (404).
 
-## Authentication and integrations
+## Authentication
 
-There is no authentication, user ownership, AI, or voice integration in this project. The app is currently a local scheduler without account separation.
+bcryptjs hashes passwords. express-session creates a server-side session; connect-mongo stores it in MongoDB. The browser receives only the opaque session ID in an HttpOnly, SameSite=Lax cookie. Task routes require a session and scope data access by its user ID. The cookie is Secure in production.
 
 ## Setup
 
-Requirements: Node.js 20.19+ or 22.12+ and a MongoDB connection string.
+Requirements: Node.js 20.19+ or 22.12+ and reachable MongoDB.
 
-1. Run `npm ci` in this folder.
-2. Copy `.env.example` to `.env`; set `ATLAS_URI` to your private MongoDB URI. Keep `.env` private (it is gitignored).
-3. Run `npm run build`, then `npm run server`.
-4. Open http://localhost:3000. Check the database/API with `/api/health`.
+1. Run npm ci.
+2. Copy .env.example to .env. Set ATLAS_URI and replace SESSION_SECRET with a private random value of at least 32 characters. Generate one with: node -e "console.log(require('crypto').randomBytes(48).toString('base64url'))"
+3. Run npm run build, then npm run server.
+4. Open http://localhost:3000 and create an account.
 
-For frontend hot reload, keep Express running and run `npm run dev` in a second terminal. Vite proxies `/api` to port 3000.
+For hot reload, run npm run dev in a second terminal; Vite proxies /api calls to Express on port 3000.
 
-## Commands and checks
+Existing tasks from the pre-auth app have no owner and are not exposed to any account. After deciding which account should own them, run npm run migrate:legacy -- account@example.com. Review or back up the database first. This migration is explicit and does not run automatically.
 
-- `npm ci` installs the lockfile versions.
-- `npm run dev` starts Vite.
-- `npm run build` compiles the production frontend to `dist/`.
-- `npm run server` starts Express after MongoDB connects.
+## Commands and limitations
 
-No test or lint scripts are configured. There is no deployment manifest or CI pipeline. Production hosting needs a reachable MongoDB URI and `PORT` environment variable; Express serves `dist/` and the API together.
+npm ci installs pinned dependencies. npm run dev starts Vite. npm run build compiles to dist. npm run server starts Express. npm run migrate:legacy -- email@example.com assigns unowned tasks.
 
-## Troubleshooting and limits
-
-- **ATLAS_URI missing:** copy `.env.example` to `.env` and set a real URI.
-- **MongoDB unavailable:** verify cluster status, database credentials, and Atlas IP access list.
-- **Task list request fails:** confirm Express is running and `/api/health` responds with database connected.
-- **Production page missing:** run `npm run build` before `npm run server`.
-- No user accounts, per-user data isolation, pagination, automated tests, or deployment configuration are present.
+No test, lint, deployment, or CI scripts are configured. No email verification, password reset, login rate limiting, MFA, account deletion, or per-user export is included. Production use requires HTTPS, private ATLAS_URI and SESSION_SECRET values, and a reachable MongoDB.
