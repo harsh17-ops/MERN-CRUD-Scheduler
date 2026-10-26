@@ -17,6 +17,7 @@ export async function fetchTasks(signal) {
 
 /** Create a task or update an existing one based on whether an edit ID is provided. */
 export async function saveTask(task, editingId) {
+  // Keep create and edit on one API helper so both return the saved server representation.
   const response = await fetch(editingId ? `${TASKS_URL}/${editingId}` : TASKS_URL, {
     method: editingId ? 'PATCH' : 'POST',
     headers: { 'Content-Type': 'application/json' },

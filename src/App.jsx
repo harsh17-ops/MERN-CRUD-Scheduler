@@ -30,8 +30,11 @@ export default function App() {
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
 
+  // Restore the server-side login session before choosing which screen to show.
   useEffect(() => {
     let active = true;
+
+    // The active flag prevents a completed request from updating an unmounted app.
     fetchCurrentUser()
       .then((currentUser) => {
         if (active) setUser(currentUser);
@@ -42,9 +45,13 @@ export default function App() {
       .finally(() => {
         if (active) setCheckingSession(false);
       });
-    return () => { active = false; };
+
+    return () => {
+      active = false;
+    };
   }, []);
 
+  // Load tasks only for a signed-in user; abort stale requests on sign-out or account change.
   useEffect(() => {
     if (!user) {
       setTasks([]);
@@ -59,7 +66,9 @@ export default function App() {
         const savedTasks = await fetchTasks(controller.signal);
         setTasks(sortTasks(savedTasks));
       } catch (requestError) {
-        if (requestError.name !== 'AbortError') setError(requestError.message);
+        if (requestError.name !== 'AbortError') {
+          setError(requestError.message);
+        }
       } finally {
         if (!controller.signal.aborted) setLoading(false);
       }
@@ -73,6 +82,8 @@ export default function App() {
     () => tasks.filter((task) => filter === 'all' || task.status === filter),
     [tasks, filter],
   );
+
+  // Counts come from the full task list, not just the currently selected filter.
   const plannedCount = tasks.filter((task) => task.status === 'planned').length;
   const completedCount = tasks.length - plannedCount;
 
@@ -110,13 +121,17 @@ export default function App() {
     setError('');
 
     try {
-      // POST creates a task; PATCH updates the selected record using the same form.
+      // The API chooses POST or PATCH from editingId; update local state only after it succeeds.
       const savedTask = await saveTask(form, editingId);
-      setTasks((currentTasks) => sortTasks(
-        editingId
-          ? currentTasks.map((task) => task._id === savedTask._id ? savedTask : task)
-          : [...currentTasks, savedTask],
-      ));
+      setTasks((currentTasks) => {
+        const nextTasks = editingId
+          ? currentTasks.map((task) => (
+            task._id === savedTask._id ? savedTask : task
+          ))
+          : [...currentTasks, savedTask];
+
+        return sortTasks(nextTasks);
+      });
       resetForm();
     } catch (requestError) {
       setError(requestError.message);
@@ -133,6 +148,7 @@ export default function App() {
       priority: task.priority,
       status: task.status,
     });
+    // Bring the shared form into view after populating it with the selected task.
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }
 
@@ -140,7 +156,9 @@ export default function App() {
     try {
       const savedTask = await setTaskStatus(task);
       setTasks((currentTasks) => sortTasks(
-        currentTasks.map((item) => item._id === savedTask._id ? savedTask : item),
+        currentTasks.map((item) => (
+          item._id === savedTask._id ? savedTask : item
+        )),
       ));
       setError('');
     } catch (requestError) {
@@ -151,8 +169,13 @@ export default function App() {
   async function handleRemove(task) {
     try {
       await removeTask(task._id);
-      setTasks((currentTasks) => currentTasks.filter((item) => item._id !== task._id));
-      if (editingId === task._id) resetForm();
+      setTasks((currentTasks) => (
+        currentTasks.filter((item) => item._id !== task._id)
+      ));
+
+      if (editingId === task._id) {
+        resetForm();
+      }
       setError('');
     } catch (requestError) {
       setError(requestError.message);
@@ -160,8 +183,13 @@ export default function App() {
   }
 
   if (checkingSession) {
-    return <main className="auth-shell"><p className="notice">Checking your session…</p></main>;
+    return (
+      <main className="auth-shell">
+        <p className="notice">Checking your session…</p>
+      </main>
+    );
   }
+
   if (!user) {
     return <AuthPanel onAuthenticated={handleAuthentication} />;
   }
@@ -172,22 +200,41 @@ export default function App() {
         <a className="brand" href="#">◈ taskflow<span>.</span></a>
         <div className="account-tools">
           <small>{user.email}</small>
-          <button onClick={handleSignOut}>Sign out</button>
+          <button type="button" onClick={handleSignOut}>Sign out</button>
         </div>
       </header>
+
       <section className="intro">
         <div>
           <p className="eyebrow">A little clarity goes a long way</p>
-          <h1>Make room for<br /><em>what matters.</em></h1>
-          <p className="lead">A thoughtful place for your next deadline, big idea, and everything in between.</p>
+          <h1>
+            Make room for
+            <br />
+            <em>what matters.</em>
+          </h1>
+          <p className="lead">
+            A thoughtful place for your next deadline, big idea, and everything
+            in between.
+          </p>
         </div>
         <aside>
           <small>TODAY</small>
           <b>{new Date().getDate()}</b>
-          <span>{new Intl.DateTimeFormat(undefined, { month: 'long', year: 'numeric' }).format(new Date())}</span>
+          <span>
+            {new Intl.DateTimeFormat(undefined, {
+              month: 'long',
+              year: 'numeric',
+            }).format(new Date())}
+          </span>
         </aside>
       </section>
-      <TaskStats total={tasks.length} planned={plannedCount} completed={completedCount} />
+
+      <TaskStats
+        total={tasks.length}
+        planned={plannedCount}
+        completed={completedCount}
+      />
+
       <div className="grid">
         <TaskForm
           form={form}
@@ -210,6 +257,7 @@ export default function App() {
           onRemove={handleRemove}
         />
       </div>
+
       <footer>
         <span>Made for the work that matters.</span>
         <span>Your schedule is saved automatically</span>

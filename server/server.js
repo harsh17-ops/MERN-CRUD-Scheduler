@@ -43,6 +43,7 @@ async function startServer() {
     throw new Error('SESSION_SECRET must be set to a random secret of at least 32 characters.');
   }
 
+  // Connect before mounting the session store so startup fails clearly when MongoDB is unavailable.
   await mongoose.connect(process.env.ATLAS_URI, { dbName: 'taskflow' });
   if (process.env.NODE_ENV === 'production') app.set('trust proxy', 1);
 

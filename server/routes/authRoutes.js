@@ -7,6 +7,7 @@ const PASSWORD_MIN_LENGTH = 8;
 const PASSWORD_MAX_BYTES = 72;
 
 function publicUser(user) {
+  // Keep passwordHash and internal database fields out of API responses.
   return { id: user._id.toString(), email: user.email };
 }
 
@@ -54,6 +55,7 @@ router.post('/register', async (request, response, next) => {
 
     const passwordHash = await bcrypt.hash(password, 12);
     const user = await User.create({ email, passwordHash });
+    // Rotate the session ID after authentication to avoid reusing a pre-login session.
     await regenerateSession(request);
     request.session.userId = user._id.toString();
     await saveSession(request);
@@ -76,6 +78,7 @@ router.post('/login', async (request, response, next) => {
       return response.status(401).json({ message: 'Email or password is incorrect.' });
     }
 
+    // Start a fresh authenticated session after validating credentials.
     await regenerateSession(request);
     request.session.userId = user._id.toString();
     await saveSession(request);
